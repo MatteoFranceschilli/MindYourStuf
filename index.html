@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>PsycoTrack</title>
+<title>MindYourStuf</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Lato:wght@300;400;700&family=Cinzel:wght@400;600&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap"/>
 <style>*{box-sizing:border-box;margin:0;padding:0}body{margin:0}select,input,button{font-family:inherit}</style>
 </head>
@@ -15,17 +15,26 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script>
-// ─── FIREBASE ────────────────────────────────────────────────────────────────
-firebase.initializeApp({
-  apiKey:"AIzaSyAKmLBj-6VVjEnYRXjXBYB0QeMMmaJAg8s",
-  authDomain:"psycotrack.firebaseapp.com",
-  projectId:"psycotrack",
-  storageBucket:"psycotrack.firebasestorage.app",
-  messagingSenderId:"320741467560",
-  appId:"1:320741467560:web:12e26fcdb533ca5d38a99d"
-});
-const auth = firebase.auth();
-const db   = firebase.firestore();
+window.addEventListener('load', function() {
+// ─── FIREBASE CONFIG ─────────────────────────────────────────────────────────
+const FB_KEY = "mys_firebase_cfg";
+let auth, db;
+
+function initFirebase(cfg) {
+  if (!firebase.apps.length) firebase.initializeApp(cfg);
+  auth = firebase.auth();
+  db   = firebase.firestore();
+}
+
+function getSavedConfig() {
+  try { return JSON.parse(localStorage.getItem(FB_KEY)); } catch(e) { return null; }
+}
+function saveConfig(cfg) {
+  localStorage.setItem(FB_KEY, JSON.stringify(cfg));
+}
+
+const savedCfg = getSavedConfig();
+if (savedCfg) initFirebase(savedCfg);
 
 async function loadData(uid) {
   try { const snap = await db.collection("users").doc(uid).get(); return snap.exists ? snap.data() : null; }
@@ -70,18 +79,100 @@ function mkS(t) {
 const { useState, useEffect, useRef } = React;
 const e = React.createElement;
 
+// ─── FIREBASE SETUP ──────────────────────────────────────────────────────────
+function FirebaseSetupScreen({onDone}) {
+  const t=THEMES.lotr, s=mkS(t);
+  const [apiKey,setApiKey]=useState("");
+  const [authDomain,setAuthDomain]=useState("");
+  const [projectId,setProjectId]=useState("");
+  const [appId,setAppId]=useState("");
+  const [err,setErr]=useState("");
+  const [loading,setLoading]=useState(false);
+
+  const submit=async()=>{
+    if(!apiKey.trim()||!authDomain.trim()||!projectId.trim()||!appId.trim()){setErr("Tutti i campi sono obbligatori.");return;}
+    setErr("");setLoading(true);
+    const cfg={apiKey:apiKey.trim(),authDomain:authDomain.trim(),projectId:projectId.trim(),appId:appId.trim()};
+    try{
+      initFirebase(cfg);
+      // quick check: try to reach auth
+      await firebase.auth().fetchSignInMethodsForEmail("test@test.com").catch(()=>{});
+      saveConfig(cfg);
+      onDone();
+    }catch(ex){setErr("Configurazione non valida: "+ex.message);setLoading(false);}
+  };
+
+  const fields=[
+    {key:"apiKey",   label:"API Key",      val:apiKey,   set:setApiKey,   ph:"AIzaSy…"},
+    {key:"auth",     label:"Auth Domain",  val:authDomain,set:setAuthDomain,ph:"progetto.firebaseapp.com"},
+    {key:"project",  label:"Project ID",   val:projectId, set:setProjectId, ph:"nome-progetto"},
+    {key:"appId",    label:"App ID",       val:appId,    set:setAppId,    ph:"1:000000:web:abc123"},
+  ];
+
+  return e("div",{style:{minHeight:"100vh",background:t.bg,backgroundImage:t.bgImg,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+    e("div",{style:s.card({maxWidth:380,width:"100%"})},
+      e("div",{style:{fontSize:36,marginBottom:10,textAlign:"center"}},"🔥"),
+      e("div",{style:{...s.h1,marginBottom:6,textAlign:"center"}},"Configura Firebase"),
+      e("p",{style:{color:t.text2,fontSize:13,marginBottom:20,lineHeight:1.6,fontFamily:t.body,textAlign:"center"}},
+        "Inserisci i parametri del tuo progetto Firebase. Li trovi in Impostazioni progetto → Le tue app → SDK."
+      ),
+      ...fields.map(f=>e("div",{key:f.key,style:{marginBottom:12}},
+        e("span",{style:s.lbl},f.label),
+        e("input",{value:f.val,onChange:ev=>f.set(ev.target.value),placeholder:f.ph,style:s.inp()})
+      )),
+      err&&e("p",{style:{color:t.danger,fontSize:13,margin:"8px 0",fontFamily:t.body}},err),
+      e("button",{onClick:submit,disabled:loading,style:s.btn("primary",{width:"100%",marginTop:8,padding:"11px 0",fontSize:14})},
+        loading?"Verifica…":"Salva e continua →"
+      )
+    )
+  );
+}
+
 // ─── LOGIN ───────────────────────────────────────────────────────────────────
 function LoginScreen() {
   const t=THEMES.lotr, s=mkS(t);
-  const [loading,setLoading]=useState(false), [err,setErr]=useState("");
-  const login=async()=>{setLoading(true);setErr("");try{await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider());}catch(ex){setErr(ex.message);setLoading(false);}};
+  const [email,setEmail]=useState("");
+  const [pass,setPass]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState("");
+  const [mode,setMode]=useState("login"); // "login" | "register"
+
+  const submit=async()=>{
+    if(!email.trim()||!pass.trim()){setErr("Compila email e password.");return;}
+    setLoading(true);setErr("");
+    try{
+      if(mode==="login") await auth.signInWithEmailAndPassword(email.trim(),pass);
+      else               await auth.createUserWithEmailAndPassword(email.trim(),pass);
+    }catch(ex){
+      const msgs={"auth/user-not-found":"Utente non trovato.","auth/wrong-password":"Password errata.","auth/email-already-in-use":"Email già registrata.","auth/weak-password":"Password troppo debole (min 6 caratteri).","auth/invalid-email":"Email non valida."};
+      setErr(msgs[ex.code]||ex.message);
+      setLoading(false);
+    }
+  };
+
   return e("div",{style:{minHeight:"100vh",background:t.bg,backgroundImage:t.bgImg,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
     e("div",{style:s.card({maxWidth:340,width:"100%",textAlign:"center"})},
       e("div",{style:{fontSize:48,marginBottom:12}},"🌿"),
-      e("div",{style:{...s.h1,marginBottom:8,textAlign:"center"}},"PsycoTrack"),
-      e("p",{style:{color:t.text2,fontSize:14,marginBottom:24,fontFamily:t.body,lineHeight:1.6}},"Accedi con Google per sincronizzare i tuoi dati su tutti i dispositivi."),
-      err&&e("p",{style:{color:t.danger,fontSize:13,marginBottom:16,fontFamily:t.body}},err),
-      e("button",{onClick:login,disabled:loading,style:s.btn("primary",{width:"100%",padding:"12px 14px",fontSize:15})},loading?"Accesso…":"🔑 Accedi con Google")
+      e("div",{style:{...s.h1,marginBottom:20,textAlign:"center"}},"MindYourStuf"),
+
+      e("div",{style:{display:"flex",background:t.surface2,borderRadius:8,padding:3,marginBottom:20}},
+        ...["login","register"].map(m=>e("button",{key:m,onClick:()=>{setMode(m);setErr("");},style:{flex:1,padding:"7px 0",borderRadius:6,border:"none",background:mode===m?t.accent:"transparent",color:mode===m?t.txtOnAccent:t.text2,cursor:"pointer",fontFamily:t.body,fontSize:13,fontWeight:mode===m?700:400,transition:"all .15s"}},m==="login"?"Accedi":"Registrati"))
+      ),
+
+      e("div",{style:{marginBottom:10,textAlign:"left"}},
+        e("span",{style:s.lbl},"Email"),
+        e("input",{type:"email",value:email,onChange:ev=>setEmail(ev.target.value),placeholder:"nome@email.com",style:s.inp(),onKeyDown:ev=>ev.key==="Enter"&&submit()})
+      ),
+      e("div",{style:{marginBottom:16,textAlign:"left"}},
+        e("span",{style:s.lbl},"Password"),
+        e("input",{type:"password",value:pass,onChange:ev=>setPass(ev.target.value),placeholder:"••••••••",style:s.inp(),onKeyDown:ev=>ev.key==="Enter"&&submit()})
+      ),
+
+      err&&e("p",{style:{color:t.danger,fontSize:13,marginBottom:12,fontFamily:t.body,textAlign:"left"}},err),
+
+      e("button",{onClick:submit,disabled:loading,style:s.btn("primary",{width:"100%",padding:"11px 14px",fontSize:15})},
+        loading?"…":mode==="login"?"🔑 Accedi":"✨ Registrati"
+      )
     )
   );
 }
@@ -229,8 +320,8 @@ function HomePage({sessions,pid,cost,t,onNavigate}) {
     else g.pen++;
   }
   const years=Object.keys(byYear).map(Number).sort((a,b)=>b-a);
-  const yearRows=years.map(y=>{const ms=Object.values(byYear[y]);return{year:y,att:ms.reduce((s,g)=>s+g.att,0),mis:ms.reduce((s,g)=>s+g.mis,0),pen:ms.reduce((s,g)=>s+g.pen,0),tot:ms.reduce((s,g)=>s+g.tot,0)};});
-  const grand=yearRows.reduce((s,r)=>({att:s.att+r.att,mis:s.mis+r.mis,pen:s.pen+r.pen,tot:s.tot+r.tot}),{att:0,mis:0,pen:0,tot:0});
+  const yearRows=years.map(y=>{const ms=Object.values(byYear[y]);return{year:y,att:ms.reduce((s,g)=>s+g.att,0),mis:ms.reduce((s,g)=>s+g.mis,0),tot:ms.reduce((s,g)=>s+g.tot,0)};});
+  const grand=yearRows.reduce((s,r)=>({att:s.att+r.att,mis:s.mis+r.mis,tot:s.tot+r.tot}),{att:0,mis:0,tot:0});
   const thC={fontSize:10,color:t.text2,textTransform:"uppercase",letterSpacing:"0.03em",padding:"6px 6px",fontFamily:t.body,borderBottom:`1px solid ${t.border}`,background:t.surface2,whiteSpace:"nowrap"};
   const tdC=(color,align,bold,noBorder)=>({fontSize:13,color:color||t.text,padding:"8px 6px",textAlign:align||"center",fontFamily:t.body,fontWeight:bold?700:400,borderBottom:noBorder?"none":`1px solid ${t.border}`});
   return e("div",null,
@@ -239,12 +330,11 @@ function HomePage({sessions,pid,cost,t,onNavigate}) {
       all.length===0
         ?e("div",{style:{padding:28,textAlign:"center",color:t.text2,fontSize:14,fontFamily:t.body}},"Nessuna seduta registrata")
         :e("table",{style:{width:"100%",borderCollapse:"collapse",tableLayout:"fixed"}},
-            e("colgroup",null,e("col",{style:{width:"18%"}}),e("col",{style:{width:"20%"}}),e("col",{style:{width:"18%"}}),e("col",{style:{width:"20%"}}),e("col",{style:{width:"24%"}})),
+            e("colgroup",null,e("col",{style:{width:"25%"}}),e("col",{style:{width:"25%"}}),e("col",{style:{width:"25%"}}),e("col",{style:{width:"25%"}})),
             e("thead",null,e("tr",null,
               e("th",{style:{...thC,textAlign:"left",paddingLeft:10}},"Anno"),
               e("th",{style:{...thC,textAlign:"center"}},"Effett."),
               e("th",{style:{...thC,textAlign:"center"}},"Saltate"),
-              e("th",{style:{...thC,textAlign:"center"}},"Da conf."),
               e("th",{style:{...thC,textAlign:"right",paddingRight:10}},"Costo")
             )),
             e("tbody",null,
@@ -252,14 +342,12 @@ function HomePage({sessions,pid,cost,t,onNavigate}) {
                 e("td",{style:{...tdC(t.accent,"left",true),paddingLeft:10}},r.year),
                 e("td",{style:tdC(t.success)},r.att||"—"),
                 e("td",{style:tdC(t.danger)},r.mis||"—"),
-                e("td",{style:tdC(t.text2)},r.pen||"—"),
                 e("td",{style:{...tdC(r.tot>0?t.accent:t.text2,"right",true),paddingRight:10}},r.tot>0?`€${r.tot}`:"—")
               )),
               e("tr",{style:{background:t.surface2}},
                 e("td",{style:{...tdC(t.text,"left",true,true),paddingLeft:10}},"Totale"),
                 e("td",{style:tdC(t.success,"center",true,true)},grand.att||"—"),
                 e("td",{style:tdC(t.danger,"center",true,true)},grand.mis||"—"),
-                e("td",{style:tdC(t.text2,"center",true,true)},grand.pen||"—"),
                 e("td",{style:{...tdC(grand.tot>0?t.accent:t.text2,"right",true,true),paddingRight:10}},grand.tot>0?`€${grand.tot}`:"—")
               )
             )
@@ -268,18 +356,17 @@ function HomePage({sessions,pid,cost,t,onNavigate}) {
     years.length>0&&e("div",null,
       e("div",{style:{...s.lbl,marginBottom:8,color:t.accent,borderBottom:`1px solid ${t.accent}44`,paddingBottom:4}},"Dettaglio mensile"),
       ...years.map(year=>{
-        const months=Object.keys(byYear[year]).map(Number).sort((a,b)=>b-a);
+        const months=Object.keys(byYear[year]).map(Number).sort((a,b)=>a-b);
         return e("div",{key:year,style:s.tcard({marginBottom:12})},
           e("div",{style:{padding:"8px 14px",borderBottom:`1px solid ${t.border}`,background:t.surface2,borderLeft:`3px solid ${t.accent}`}},
             e("span",{style:{fontFamily:t.font,fontSize:15,fontWeight:700,color:t.accent}},year)
           ),
           e("table",{style:{width:"100%",borderCollapse:"collapse",tableLayout:"fixed"}},
-            e("colgroup",null,e("col",{style:{width:"30%"}}),e("col",{style:{width:"16%"}}),e("col",{style:{width:"16%"}}),e("col",{style:{width:"16%"}}),e("col",{style:{width:"22%"}})),
+            e("colgroup",null,e("col",{style:{width:"34%"}}),e("col",{style:{width:"18%"}}),e("col",{style:{width:"18%"}}),e("col",{style:{width:"30%"}})),
             e("thead",null,e("tr",null,
               e("th",{style:{...thC,textAlign:"left",paddingLeft:10}},"Mese"),
               e("th",{style:{...thC,textAlign:"center"}},"✓"),
               e("th",{style:{...thC,textAlign:"center"}},"✗"),
-              e("th",{style:{...thC,textAlign:"center"}},"·"),
               e("th",{style:{...thC,textAlign:"right",paddingRight:10}},"Costo")
             )),
             e("tbody",null,
@@ -289,7 +376,6 @@ function HomePage({sessions,pid,cost,t,onNavigate}) {
                   e("td",{style:{...tdC(t.text,"left",true,last),paddingLeft:10}},MONTHS[mo]),
                   e("td",{style:tdC(t.success,"center",false,last)},g.att||"—"),
                   e("td",{style:tdC(t.danger,"center",false,last)},g.mis||"—"),
-                  e("td",{style:tdC(t.text2,"center",false,last)},g.pen||"—"),
                   e("td",{style:{...tdC(g.tot>0?t.accent:t.text2,"right",true,last),paddingRight:10}},g.tot>0?`€${g.tot}`:"—")
                 );
               })
@@ -318,7 +404,19 @@ function expandBoundItem(item, horizonIso) {
   const {freq,endDate}=item.recurrence;
   const end=endDate&&endDate<horizonIso?endDate:horizonIso;
   const entries=[];
-  let d=new Date(item.date+"T12:00:00"), count=0;
+  let d=new Date(item.date+"T12:00:00");
+  const todayMs=new Date().setHours(12,0,0,0);
+  // fast-forward to first occurrence on or after today
+  let ff=0;
+  while(d.getTime()<todayMs && ff<50000){
+    ff++;
+    if(freq==="daily")        d.setDate(d.getDate()+1);
+    else if(freq==="weekly")  d.setDate(d.getDate()+7);
+    else if(freq==="monthly") d.setMonth(d.getMonth()+1);
+    else if(freq==="yearly")  d.setFullYear(d.getFullYear()+1);
+    else break;
+  }
+  let count=0;
   while(count<200){
     const iso=isoDate(d);
     if(iso>end) break;
@@ -427,22 +525,196 @@ function AddBoundModal({t,onSave,onClose}) {
   );
 }
 
+// ─── BOUND: IMPEGNI HELPERS ──────────────────────────────────────────────────
+function getImpegniEntries(impegni,horizonIso){
+  const entries=[];
+  for(const imp of (impegni||[])){
+    const done=imp.completedDates||{};
+    if(imp.type==="scadenza"){
+      if(imp.date&&!done[imp.date]) entries.push({id:`imp_${imp.id}`,date:imp.date,title:`📌 ${imp.oggetto||"Scadenza"}`,note:"",isImpegno:true,impegnoId:imp.id});
+    } else if(imp.type==="documento"){
+      if(imp.expiry){
+        const lbl=imp.docType||"Documento";
+        if(!done[imp.expiry]) entries.push({id:`imp_${imp.id}_exp`,date:imp.expiry,title:`📄 Scadenza ${lbl}`,note:imp.issueDate?`Rilascio: ${fmtDate(imp.issueDate)}`:"",isImpegno:true,impegnoId:imp.id});
+        const d30=new Date(imp.expiry+"T12:00:00"); d30.setDate(d30.getDate()-30);
+        const warn=isoDate(d30);
+        if(warn!==imp.expiry&&!done[warn]) entries.push({id:`imp_${imp.id}_w30`,date:warn,title:`⚠️ ${lbl} scade tra 30 giorni`,note:"",isImpegno:true,isWarning:true,impegnoId:imp.id});
+      }
+    } else if(imp.type==="ricorrenza"){
+      if(imp.date){
+        const fake={id:`imp_${imp.id}`,date:imp.date,title:`🔁 ${imp.oggetto||"Ricorrenza"}`,note:"",recurrence:{freq:imp.freq||"monthly",endDate:null}};
+        const exp=expandBoundItem(fake,horizonIso);
+        exp.forEach(x=>{x.isImpegno=true;x.impegnoId=imp.id;x.occDate=x.date;});
+        entries.push(...exp.filter(x=>!done[x.date]));
+      }
+    }
+  }
+  return entries;
+}
+
+function expiryBadge(expiry,t){
+  if(!expiry) return null;
+  const d=Math.round((new Date(expiry+"T12:00:00")-new Date())/864e5);
+  const col=d<0?t.danger:d<=30?t.danger:d<=90?"#e67e22":t.success;
+  const txt=d<0?`Scaduto ${-d}g fa`:d===0?"Scade oggi":d<=90?`Scade tra ${d}g`:`Valido ancora ${d}g`;
+  return e("span",{style:{background:col+"22",color:col,border:`1px solid ${col}44`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}},txt);
+}
+
+// ─── BOUND: ADD/EDIT IMPEGNO MODAL ──────────────────────────────────────────
+function AddImpegnoModal({t,onSave,onClose,initial}){
+  const s=mkS(t);
+  const isEdit=!!initial;
+  const [type,setType]=useState(initial?.type||"scadenza");
+  const [oggetto,setOggetto]=useState(initial?.oggetto||"");
+  const [date,setDate]=useState(initial?.date||"");
+  const [freq,setFreq]=useState(initial?.freq||"monthly");
+  const [docType,setDocType]=useState(initial?.docType||"");
+  const [issueDate,setIssueDate]=useState(initial?.issueDate||"");
+  const [expiry,setExpiry]=useState(initial?.expiry||"");
+  const TYPES=[{id:"scadenza",icon:"📌",lbl:"Scadenza"},{id:"ricorrenza",icon:"🔁",lbl:"Ricorrenza"},{id:"documento",icon:"📄",lbl:"Documento"}];
+  const doSave=()=>{
+    const base={id:initial?.id||uid(),type,completed:initial?.completed||false};
+    if(type==="scadenza")        onSave({...base,oggetto,date});
+    else if(type==="ricorrenza") onSave({...base,oggetto,date,freq});
+    else                         onSave({...base,docType,issueDate,expiry});
+  };
+  return e("div",{style:s.modal,onClick:onClose},
+    e("div",{style:s.mbox,onClick:ev=>ev.stopPropagation()},
+      e("div",{style:s.h2},isEdit?"Modifica impegno":"Nuovo impegno"),
+      e("div",{style:{marginBottom:16}},
+        e("span",{style:s.lbl},"Tipo"),
+        e("div",{style:{display:"flex",gap:6}},
+          ...TYPES.map(tp=>e("button",{key:tp.id,onClick:()=>setType(tp.id),style:s.btn("secondary",{flex:1,padding:"8px 6px",fontSize:12,background:type===tp.id?t.accent:t.surface2,color:type===tp.id?t.txtOnAccent:t.text2,borderColor:type===tp.id?"transparent":t.border})},
+            e("span",null,tp.icon)," ",tp.lbl
+          ))
+        )
+      ),
+      type==="documento"&&e("div",null,
+        e("div",{style:{marginBottom:12}},e("span",{style:s.lbl},"Tipo documento"),e("input",{value:docType,onChange:ev=>setDocType(ev.target.value),placeholder:"Es. Carta d'Identità, Patente…",style:s.inp()})),
+        e("div",{style:{marginBottom:12}},e("span",{style:s.lbl},"Data rilascio"),e("input",{type:"date",value:issueDate,onChange:ev=>setIssueDate(ev.target.value),style:s.inp()})),
+        e("div",{style:{marginBottom:16}},e("span",{style:s.lbl},"Data scadenza"),e("input",{type:"date",value:expiry,onChange:ev=>setExpiry(ev.target.value),style:s.inp()}))
+      ),
+      type==="ricorrenza"&&e("div",null,
+        e("div",{style:{marginBottom:12}},e("span",{style:s.lbl},"Oggetto"),e("input",{value:oggetto,onChange:ev=>setOggetto(ev.target.value),placeholder:"Es. Palestra, Riunione…",style:s.inp()})),
+        e("div",{style:{marginBottom:12}},e("span",{style:s.lbl},"Data inizio"),e("input",{type:"date",value:date,onChange:ev=>setDate(ev.target.value),style:s.inp()})),
+        e("div",{style:{marginBottom:16}},
+          e("span",{style:s.lbl},"Frequenza"),
+          e("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
+            ...["daily","weekly","monthly","yearly"].map(f=>
+              e("button",{key:f,onClick:()=>setFreq(f),style:s.btn("secondary",{padding:"6px 10px",fontSize:12,background:freq===f?t.accent:t.surface2,color:freq===f?t.txtOnAccent:t.text2,borderColor:freq===f?"transparent":t.border})},RECUR_LABELS[f])
+            )
+          )
+        )
+      ),
+      type==="scadenza"&&e("div",null,
+        e("div",{style:{marginBottom:12}},e("span",{style:s.lbl},"Oggetto"),e("input",{value:oggetto,onChange:ev=>setOggetto(ev.target.value),placeholder:"Es. Revisione auto, Visita medica…",style:s.inp()})),
+        e("div",{style:{marginBottom:16}},e("span",{style:s.lbl},"Data"),e("input",{type:"date",value:date,onChange:ev=>setDate(ev.target.value),style:s.inp()}))
+      ),
+      e("div",{style:{display:"flex",gap:8}},
+        e("button",{style:s.btn("primary",{flex:1}),onClick:doSave},isEdit?"Salva":"Aggiungi"),
+        e("button",{style:s.btn("secondary"),onClick:onClose},"Annulla")
+      )
+    )
+  );
+}
+
+// ─── BOUND: IMPEGNI VIEW ─────────────────────────────────────────────────────
+function ImpegniView({impegni,t,onAdd,onEdit,onDelete}){
+  const s=mkS(t);
+  const TYPE_ICON={scadenza:"📌",ricorrenza:"🔁",documento:"📄"};
+  const TYPE_LBL ={scadenza:"Scadenza",ricorrenza:"Ricorrenza",documento:"Documento"};
+  return e("div",null,
+    e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
+      e("div",{style:s.h2},"📋 Impegni"),
+      e("button",{style:s.btn(),onClick:onAdd},"+ Aggiungi")
+    ),
+    impegni.length===0&&e("div",{style:s.card({textAlign:"center",color:t.text2,padding:32,fontSize:14,lineHeight:1.6})},
+      "Nessun impegno — aggiungi Documento, Ricorrenza o Scadenza"
+    ),
+    ...impegni.map(imp=>{
+      const icon=TYPE_ICON[imp.type]||"📌";
+      const lbl=TYPE_LBL[imp.type]||imp.type;
+      let title="",sub="";
+      if(imp.type==="documento"){
+        title=imp.docType||"Documento";
+        const parts=[];
+        if(imp.issueDate) parts.push(`Rilascio: ${fmtDate(imp.issueDate)}`);
+        if(imp.expiry)    parts.push(`Scadenza: ${fmtDate(imp.expiry)}`);
+        sub=parts.join("  ·  ");
+      } else if(imp.type==="ricorrenza"){
+        title=imp.oggetto||"Ricorrenza";
+        const parts=[];
+        if(imp.date) parts.push(fmtDate(imp.date));
+        if(imp.freq) parts.push(RECUR_LABELS[imp.freq]||imp.freq);
+        sub=parts.join("  ·  ");
+      } else {
+        title=imp.oggetto||"Scadenza";
+        if(imp.date) sub=fmtDate(imp.date);
+      }
+      return e("div",{key:imp.id,style:s.card({marginBottom:8,display:"flex",alignItems:"center",gap:10})},
+        e("div",{style:{fontSize:20,flexShrink:0}},icon),
+        e("div",{style:{flex:1,minWidth:0}},
+          e("div",{style:{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:2}},
+            e("span",{style:{background:t.surface2,color:t.text2,borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em"}},lbl),
+            imp.type==="documento"&&imp.expiry&&expiryBadge(imp.expiry,t)
+          ),
+          e("div",{style:{fontSize:14,fontWeight:600,color:t.text}},title),
+          sub&&e("div",{style:{fontSize:12,color:t.text2,marginTop:2}},sub)
+        ),
+        e("button",{onClick:()=>onEdit(imp),style:{background:"transparent",border:"none",cursor:"pointer",color:t.text2,fontSize:14,padding:"2px 6px",flexShrink:0}},"✏️"),
+        e("button",{onClick:()=>onDelete(imp.id),style:{background:"transparent",border:"none",cursor:"pointer",color:t.text2,fontSize:18,padding:"2px 4px",flexShrink:0}},"×")
+      );
+    })
+  );
+}
+
+// ─── BOUND: ARCHIVIO VIEW ────────────────────────────────────────────────────
+function ArchivioView({impegni,t,onUncheck}){
+  const s=mkS(t);
+  const TYPE_ICON={scadenza:"📌",ricorrenza:"🔁",documento:"📄"};
+  // build flat list of completed occurrences: [{impegnoId, date, title, icon}]
+  const rows=[];
+  for(const imp of impegni){
+    const done=imp.completedDates||{};
+    const dates=Object.keys(done).filter(d=>done[d]).sort((a,b)=>b.localeCompare(a));
+    if(!dates.length) continue;
+    const icon=TYPE_ICON[imp.type]||"📌";
+    let baseTitle="";
+    if(imp.type==="documento") baseTitle=imp.docType||"Documento";
+    else baseTitle=imp.oggetto||(imp.type==="ricorrenza"?"Ricorrenza":"Scadenza");
+    for(const d of dates) rows.push({key:`${imp.id}_${d}`,impegnoId:imp.id,date:d,title:baseTitle,icon});
+  }
+  rows.sort((a,b)=>b.date.localeCompare(a.date));
+  return e("div",null,
+    e("div",{style:{...s.h2,marginBottom:14}},"🗄️ Archivio"),
+    rows.length===0&&e("div",{style:s.card({textAlign:"center",color:t.text2,padding:32,fontSize:14,lineHeight:1.6})},
+      "Nessun impegno completato"
+    ),
+    rows.length>0&&e("div",{style:{...s.tcard(),padding:"0 16px"}},
+      ...rows.map(r=>e("div",{key:r.key,style:{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:`1px solid ${t.border}`}},
+        e("div",{style:{fontSize:18,flexShrink:0}},r.icon),
+        e("div",{style:{flex:1,minWidth:0}},
+          e("div",{style:{fontSize:14,fontWeight:600,color:t.text2,textDecoration:"line-through"}},r.title),
+          e("div",{style:{fontSize:11,color:t.text2,marginTop:2}},fmtDate(r.date))
+        ),
+        e("button",{onClick:()=>onUncheck(r.impegnoId,r.date),style:{background:"transparent",border:`1px solid ${t.border}`,borderRadius:6,cursor:"pointer",color:t.text2,fontSize:11,padding:"3px 8px",flexShrink:0}},"↩")
+      ))
+    )
+  );
+}
+
 // ─── BOUND: AGENDA VIEW ──────────────────────────────────────────────────────
-function AgendaView({boundItems,boundDocs,t,done,onToggle,onDelete,onAdd}) {
+function AgendaView({boundItems,impegni,t,done,onToggle,onDelete,onCompleteImpegno}){
   const s=mkS(t);
   const [showPast,setShowPast]=useState(false);
   const today=isoDate(new Date());
   const horizon=`${new Date().getFullYear()+1}-12-31`;
-
   const allManual=[];
   for(const item of boundItems) allManual.push(...expandBoundItem(item,horizon));
-  const docEntries=getDocEntries(boundDocs);
-  const all=[...allManual,...docEntries];
-
+  const impEntries=getImpegniEntries(impegni,horizon);
+  const all=[...allManual,...impEntries];
   const upcoming=all.filter(x=>x.date>=today).sort((a,b)=>a.date.localeCompare(b.date));
   const past=allManual.filter(x=>x.date<today).sort((a,b)=>b.date.localeCompare(a.date));
-
-  // group upcoming by month
   const grouped={};
   for(const entry of upcoming){
     const [y,m]=entry.date.split("-");
@@ -451,121 +723,81 @@ function AgendaView({boundItems,boundDocs,t,done,onToggle,onDelete,onAdd}) {
     grouped[key].push(entry);
   }
   const groupKeys=Object.keys(grouped).sort();
-
   return e("div",null,
-    e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
-      e("div",{style:s.h2},"📋 Agenda"),
-      e("button",{style:s.btn(),onClick:onAdd},"+ Aggiungi")
-    ),
-
+    e("div",{style:{...s.h2,marginBottom:14}},"📅 Agenda"),
     upcoming.length===0&&e("div",{style:s.card({textAlign:"center",color:t.text2,padding:32,fontSize:14,lineHeight:1.6,marginBottom:12})},
-      "Nessun impegno in arrivo — aggiungi un impegno o inserisci le scadenze dei tuoi documenti"
+      "Nessun impegno in arrivo — aggiungili dal tab Impegni"
     ),
-
     ...groupKeys.map(key=>{
       const [y,m]=key.split("-");
-      const label=`${MONTHS[Number(m)-1]} ${y}`;
       return e("div",{key,style:{marginBottom:12}},
-        e("div",{style:{fontSize:11,color:t.accent,textTransform:"uppercase",letterSpacing:"0.07em",fontFamily:t.body,borderBottom:`1px solid ${t.accent}44`,paddingBottom:4,marginBottom:8}},label),
+        e("div",{style:{fontSize:11,color:t.accent,textTransform:"uppercase",letterSpacing:"0.07em",fontFamily:t.body,borderBottom:`1px solid ${t.accent}44`,paddingBottom:4,marginBottom:8}},`${MONTHS[Number(m)-1]} ${y}`),
         e("div",{style:{...s.tcard(),padding:"0 16px"}},
           ...grouped[key].map(entry=>e(BoundItemRow,{
             key:entry.id,entry,t,
             done:!!done[entry.id],
-            onToggle:entry.isDoc?null:()=>onToggle(entry.id),
-            onDelete:entry.isDoc||entry.recur?null:()=>onDelete(entry.itemId)
+            onToggle:entry.isImpegno?()=>onCompleteImpegno(entry.impegnoId,entry.date):()=>onToggle(entry.id),
+            onDelete:entry.isImpegno||entry.recur?null:()=>onDelete(entry.itemId)
           }))
         )
       );
     }),
-
     past.length>0&&e("div",{style:{marginTop:8}},
       e("button",{style:s.btn("secondary",{width:"100%",fontSize:12}),onClick:()=>setShowPast(x=>!x)},
-        showPast?`▲ Nascondi passati`:`▼ Mostra passati (${past.length})`
+        showPast?"▲ Nascondi passati":`▼ Mostra passati (${past.length})`
       ),
       showPast&&e("div",{style:{...s.tcard(),marginTop:8,padding:"0 16px"}},
         ...past.map(entry=>e(BoundItemRow,{
           key:entry.id,entry,t,
           done:!!done[entry.id],
-          onToggle:()=>onToggle(entry.id),
-          onDelete:entry.recur?null:()=>onDelete(entry.itemId)
+          onToggle:entry.isImpegno?()=>onCompleteImpegno(entry.impegnoId,entry.date):()=>onToggle(entry.id),
+          onDelete:entry.isImpegno||entry.recur?null:()=>onDelete(entry.itemId)
         }))
       )
     )
   );
 }
 
-// ─── BOUND: DOCUMENTI VIEW ───────────────────────────────────────────────────
-function DocumentiView({boundDocs,t,onSave}) {
-  const s=mkS(t);
-  const [docs,setDocs]=useState({idCard:{},license:{},carInspection:{},...(boundDocs||{})});
-  const [flash,setFlash]=useState("");
-
-  const setField=(docKey,field,val)=>setDocs(d=>({...d,[docKey]:{...(d[docKey]||{}),[field]:val}}));
-
-  function expiryStatus(expiry) {
-    if(!expiry) return null;
-    const diff=Math.round((new Date(expiry+"T12:00:00")-new Date())/864e5);
-    if(diff<0)  return {color:t.danger,  txt:`Scaduto ${-diff} giorni fa`};
-    if(diff===0)return {color:t.danger,  txt:"Scade oggi"};
-    if(diff<=30)return {color:t.danger,  txt:`Scade tra ${diff} giorni`};
-    if(diff<=90)return {color:"#e67e22", txt:`Scade tra ${diff} giorni`};
-    return       {color:t.success, txt:`Valido ancora ${diff} giorni`};
-  }
-
-  const doSave=()=>{onSave(docs);setFlash("saved");setTimeout(()=>setFlash(""),2200);};
-
-  return e("div",null,
-    e("div",{style:{...s.h2,marginBottom:8}},"📄 Documenti"),
-    e("p",{style:{fontSize:13,color:t.text2,marginBottom:18,lineHeight:1.6}},
-      "Inserisci i dati dei tuoi documenti. Le scadenze e i promemoria a 30 giorni appariranno automaticamente nell'Agenda."
-    ),
-
-    ...DOC_DEFS.map(def=>{
-      const doc=(docs[def.key]||{});
-      const st=expiryStatus(doc.expiry);
-      return e("div",{key:def.key,style:s.card({marginBottom:12})},
-        e("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:12,flexWrap:"wrap"}},
-          e("span",{style:{fontSize:20}},def.icon),
-          e("span",{style:{fontFamily:t.font,fontSize:15,fontWeight:600,color:t.text}},def.label),
-          st&&e("span",{style:{background:st.color+"22",color:st.color,border:`1px solid ${st.color}44`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:600}},st.txt)
-        ),
-        ...def.fields.map(f=>e("div",{key:f.key,style:{marginBottom:10}},
-          e("span",{style:s.lbl},f.label),
-          e("input",{type:f.type||"text",value:doc[f.key]||"",onChange:ev=>setField(def.key,f.key,ev.target.value),placeholder:f.ph||"",style:s.inp()})
-        ))
-      );
-    }),
-
-    e("button",{style:s.btn("primary",{width:"100%",marginTop:4}),onClick:doSave},
-      flash==="saved"?"✓ Salvato!":"Salva documenti"
-    )
-  );
-}
-
 // ─── BOUND TAB ───────────────────────────────────────────────────────────────
-function BoundTab({boundItems,setBoundItems,boundDocs,setBoundDocs,boundDone,setBoundDone,t}) {
+function BoundTab({boundItems,setBoundItems,impegni,setImpegni,boundDone,setBoundDone,t}){
   const s=mkS(t);
   const [subTab,setSubTab]=useState("agenda");
-  const [addModal,setAddModal]=useState(false);
-
+  const [editModal,setEditModal]=useState(null); // null | impegno object
   const toggleDone=(id)=>setBoundDone(d=>({...d,[id]:!d[id]}));
   const deleteItem=(itemId)=>setBoundItems(items=>items.filter(x=>x.id!==itemId));
-
-  const SUBNAV=[{id:"agenda",icon:"📋",lbl:"Agenda"},{id:"docs",icon:"📄",lbl:"Documenti"}];
-
+  const deleteImpegno=(id)=>setImpegni(items=>items.filter(x=>x.id!==id));
+  const markDateDone=(impegnoId,date)=>setImpegni(items=>items.map(x=>x.id===impegnoId?{...x,completedDates:{...(x.completedDates||{}),[date]:true}}:x));
+  const unmarkDateDone=(impegnoId,date)=>setImpegni(items=>items.map(x=>x.id===impegnoId?{...x,completedDates:{...(x.completedDates||{}),[date]:false}}:x));
+  const saveImpegno=(imp)=>{
+    setImpegni(items=>items.map(x=>x.id===imp.id?imp:x));
+    setEditModal(null);
+  };
+  const archiveCount=impegni.reduce((n,x)=>n+Object.values(x.completedDates||{}).filter(Boolean).length,0);
+  const SUBNAV=[
+    {id:"agenda",  icon:"📅",lbl:"Agenda"},
+    {id:"impegni", icon:"📋",lbl:"Impegni"},
+    {id:"archivio",icon:"🗄️",lbl:`Archivio${archiveCount>0?" ("+archiveCount+")":""}`},
+  ];
   return e("div",null,
     e("div",{style:{padding:16,paddingBottom:80}},
-      subTab==="agenda"&&e(AgendaView,{boundItems,boundDocs,t,done:boundDone,onToggle:toggleDone,onDelete:deleteItem,onAdd:()=>setAddModal(true)}),
-      subTab==="docs"&&e(DocumentiView,{boundDocs,t,onSave:docs=>setBoundDocs(docs)})
+      subTab==="agenda"  &&e(AgendaView,{boundItems,impegni,t,done:boundDone,onToggle:toggleDone,onDelete:deleteItem,onCompleteImpegno:markDateDone}),
+      subTab==="impegni" &&e(ImpegniView,{impegni,t,onAdd:()=>setEditModal({}),onEdit:imp=>setEditModal(imp),onDelete:deleteImpegno}),
+      subTab==="archivio"&&e(ArchivioView,{impegni,t,onUncheck:unmarkDateDone})
     ),
-
     e("div",{style:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",background:t.surface,borderTop:`1px solid ${t.border}`,display:"flex",width:"100%",maxWidth:480,zIndex:10}},
-      ...SUBNAV.map(n=>e("button",{key:n.id,onClick:()=>setSubTab(n.id),style:{flex:1,padding:"10px 0",background:subTab===n.id?t.surface2:"transparent",border:"none",borderTop:`2px solid ${subTab===n.id?t.accent:"transparent"}`,color:subTab===n.id?t.accent:t.text2,cursor:"pointer",fontFamily:t.body,fontSize:10,fontWeight:subTab===n.id?700:400,display:"flex",flexDirection:"column",alignItems:"center",gap:3}},
-        e("span",{style:{fontSize:18}},n.icon),n.lbl
+      ...SUBNAV.map(n=>e("button",{key:n.id,onClick:()=>setSubTab(n.id),style:{flex:1,padding:"8px 0",background:subTab===n.id?t.surface2:"transparent",border:"none",borderTop:`2px solid ${subTab===n.id?t.accent:"transparent"}`,color:subTab===n.id?t.accent:t.text2,cursor:"pointer",fontFamily:t.body,fontSize:9,fontWeight:subTab===n.id?700:400,display:"flex",flexDirection:"column",alignItems:"center",gap:2}},
+        e("span",{style:{fontSize:16}},n.icon),n.lbl
       ))
     ),
-
-    addModal&&e(AddBoundModal,{t,onSave:item=>{setBoundItems(x=>[...x,item]);setAddModal(false);},onClose:()=>setAddModal(false)})
+    editModal!==null&&e(AddImpegnoModal,{
+      t,
+      initial:editModal.id?editModal:null,
+      onSave:imp=>{
+        if(editModal.id) saveImpegno(imp);
+        else{setImpegni(x=>[...x,{...imp,completed:false}]);setEditModal(null);}
+      },
+      onClose:()=>setEditModal(null)
+    })
   );
 }
 
@@ -585,8 +817,9 @@ function App() {
   // ── Bound state
   const [activeTab,setActiveTab] = useState("psyco");
   const [boundItems,setBoundItems] = useState([]);
-  const [boundDocs,setBoundDocs]   = useState({});
+  const [impegni,setImpegni]       = useState([]);
   const [boundDone,setBoundDone]   = useState({});
+  const [monthPaid,setMonthPaid]     = useState({}); // {pid_YYYY-MM: bool}
 
   const initialized = useRef(false);
   const currentData = useRef({});
@@ -602,8 +835,9 @@ function App() {
           if(data.sessions)  setSessions(data.sessions);
           if(data.pid)       setPid(data.pid);
           if(data.boundItems)setBoundItems(data.boundItems);
-          if(data.boundDocs) setBoundDocs(data.boundDocs);
+          if(data.impegni)   setImpegni(data.impegni);
           if(data.boundDone) setBoundDone(data.boundDone);
+          if(data.monthPaid) setMonthPaid(data.monthPaid);
           currentData.current=data;
         }
         initialized.current=true;
@@ -632,8 +866,9 @@ function App() {
   useEffect(()=>{if(initialized.current)persist({sessions});},[sessions]);
   useEffect(()=>{if(initialized.current)persist({pid});},[pid]);
   useEffect(()=>{if(initialized.current)persist({boundItems});},[boundItems]);
-  useEffect(()=>{if(initialized.current)persist({boundDocs});},[boundDocs]);
+  useEffect(()=>{if(initialized.current)persist({impegni});},[impegni]);
   useEffect(()=>{if(initialized.current)persist({boundDone});},[boundDone]);
+  useEffect(()=>{if(initialized.current)persist({monthPaid});},[monthPaid]);
   useEffect(()=>{if(!pid&&profiles.length)setPid(profiles[0].id);},[profiles]);
 
   useEffect(()=>{
@@ -660,20 +895,14 @@ function App() {
   const mKey   = `${vy}-${String(vm+1).padStart(2,"0")}`;
   const mSess  = sessions.filter(x=>x.pid===pid&&x.date.startsWith(mKey)).sort((a,b)=>a.date.localeCompare(b.date));
   const mTotal = mSess.filter(x=>x.attended===true||x.payAnyway).length*cost;
+  const mPaidKey = `${pid}_${mKey}`;
+  const isMPaid  = !!monthPaid[mPaidKey];
+  const toggleMPaid = ()=>setMonthPaid(p=>({...p,[mPaidKey]:!p[mPaidKey]}));
   const prevMonth=()=>{if(vm===0){setVm(11);setVy(y=>y-1);}else setVm(m=>m-1);};
   const nextMonth=()=>{if(vm===11){setVm(0);setVy(y=>y+1);}else setVm(m=>m+1);};
   const closeModal=()=>setModal(null);
 
-  const PSYCO_NAV=[{id:"home",icon:"🏠",lbl:"Home"},{id:"sessions",icon:"📅",lbl:"Sessioni"},{id:"profiles",icon:"👤",lbl:"Profili"},{id:"settings",icon:"🎨",lbl:"Tema"}];
-
-  if(!profiles.length||!pid) return e("div",{style:{minHeight:"100vh",background:t.bg,backgroundImage:t.bgImg,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
-    e("div",{style:s.card({maxWidth:340,width:"100%"})},
-      e("div",{style:{...s.h1,marginBottom:8}},"PsycoTrack"),
-      e("p",{style:{color:t.text2,fontSize:14,marginBottom:20,fontFamily:t.body}},"Nessun profilo. Crea il primo per iniziare."),
-      e("button",{style:s.btn(),onClick:()=>setModal({type:"profile",data:{id:null,name:"",sessionCost:50,recurringDay:null}})},"+ Nuovo Profilo")
-    ),
-    modal&&modal.type==="profile"&&e(ProfileModal,{data:modal.data,t,onSave:d=>{const np={...d,id:uid()};setProfiles([np]);setPid(np.id);closeModal();},onClose:closeModal})
-  );
+  const PSYCO_NAV=[{id:"home",icon:"🏠",lbl:"Home"},{id:"sessions",icon:"📅",lbl:"Sessioni"},{id:"profiles",icon:"👤",lbl:"Profili"}];
 
   return e("div",{style:{minHeight:"100vh",background:t.bg,backgroundImage:t.bgImg,color:t.text,fontFamily:t.body}},
     e("div",{style:{maxWidth:480,margin:"0 auto",paddingBottom:80}},
@@ -684,7 +913,7 @@ function App() {
         // Row 1: title + sync + avatar
         e("div",{style:{padding:"12px 16px 8px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}},
           e("div",{style:{display:"flex",alignItems:"center",gap:10,minWidth:0}},
-            e("div",{style:s.h1},"PsycoTrack"),
+            e("div",{style:s.h1},"MindYourStuf"),
             syncStatus&&e("span",{style:{fontSize:11,color:syncStatus==="saving"?t.text2:syncStatus==="saved"?t.success:t.danger,flexShrink:0}},syncStatus==="saving"?"💾":syncStatus==="saved"?"✓":"⚠️")
           ),
           e("div",{style:{display:"flex",alignItems:"center",gap:8,flexShrink:0}},
@@ -695,9 +924,8 @@ function App() {
                   )
                 :e("span",{style:{fontSize:13,color:t.text2}},prof?prof.name:"")
             ),
-            e("div",{style:{width:28,height:28,borderRadius:"50%",border:`1px solid ${t.border}`,background:t.surface2,cursor:"pointer",overflow:"hidden",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14},onClick:()=>setModal({type:"account"})},
-              user&&user.photoURL?e("img",{src:user.photoURL,alt:"",style:{width:"100%",height:"100%",objectFit:"cover"}}):"👤"
-            )
+            e("div",{style:{width:28,height:28,borderRadius:"50%",border:`1px solid ${t.border}`,background:t.surface2,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15},onClick:()=>setModal({type:"theme"})},"🎨"),
+            e("div",{style:{width:28,height:28,borderRadius:"50%",border:`1px solid ${t.border}`,background:t.surface2,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14},onClick:()=>setModal({type:"account"})},"👤")
           )
         ),
 
@@ -713,7 +941,7 @@ function App() {
 
       // ── Content
       activeTab==="bound"
-        ?e(BoundTab,{boundItems,setBoundItems,boundDocs,setBoundDocs,boundDone,setBoundDone,t})
+        ?e(BoundTab,{boundItems,setBoundItems,impegni,setImpegni,boundDone,setBoundDone,t})
         :e("div",{style:{padding:16}},
 
           page==="home"&&e(HomePage,{sessions,pid,cost,t,onNavigate:(y,m)=>{setVy(y);setVm(m);setPage("sessions");}}),
@@ -723,7 +951,16 @@ function App() {
             e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
               e("div",null,
                 e("div",{style:{fontSize:11,color:t.text2,fontFamily:t.body,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:2}},`${mSess.length} sedute · ${mSess.filter(x=>x.attended||x.payAnyway).length} fatturabili`),
-                e("div",{style:{fontFamily:t.font,fontSize:28,fontWeight:700,color:t.accent,lineHeight:1,textShadow:`0 0 18px ${t.accent}66`}},`€${mTotal}`)
+                e("div",{style:{display:"flex",alignItems:"center",gap:10,marginTop:2}},
+                  e("div",{style:{fontFamily:t.font,fontSize:28,fontWeight:700,color:t.accent,lineHeight:1,textShadow:`0 0 18px ${t.accent}66`}},`€${mTotal}`),
+                  mTotal>0&&e("div",{
+                    onClick:toggleMPaid,
+                    style:{cursor:"pointer",display:"flex",alignItems:"center",gap:5,background:isMPaid?t.success+"22":t.surface2,border:`1px solid ${isMPaid?t.success+"55":t.border}`,borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700,color:isMPaid?t.success:t.text2,userSelect:"none"}
+                  },
+                    e("span",null,isMPaid?"✓":"○"),
+                    isMPaid?"Pagato":"Segna pagato"
+                  )
+                )
               ),
               e("button",{style:s.btn(),onClick:()=>setModal({type:"addSess"})},"+ Aggiungi")
             ),
@@ -754,19 +991,16 @@ function App() {
           ),
 
           page==="settings"&&e("div",null,
-            e("div",{style:s.h2},"Tema"),
-            e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-              ...Object.entries(THEMES).map(([k,th])=>e("button",{key:k,onClick:()=>setTheme(k),style:{background:th.surface,border:`${theme===k?"2px":"1px"} solid ${theme===k?t.accent:t.border}`,borderRadius:12,padding:14,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:8}},
-                e("div",{style:{width:44,height:44,borderRadius:"50%",background:`conic-gradient(${th.accent} 0deg,${th.bg} 180deg,${th.surface2} 360deg)`,border:`2px solid ${th.border}`}}),
-                e("span",{style:{fontFamily:th.font,fontSize:13,color:th.text,textAlign:"center"}},th.name),
-                theme===k&&e("span",{style:{fontSize:10,color:th.accent}},"● attivo")
-              ))
-            )
+            e("div",{style:{...s.lbl,marginBottom:8,color:t.accent,borderBottom:`1px solid ${t.accent}44`,paddingBottom:4}},"Firebase"),
+            e("button",{
+              style:s.btn("danger",{width:"100%"}),
+              onClick:()=>{if(window.confirm("Reset configurazione Firebase? Verrai disconnesso.")){localStorage.removeItem(FB_KEY);auth.signOut();window.location.reload();}}
+            },"🔥 Reset configurazione Firebase")
           )
         )
     ),
 
-    // PsycoTracker bottom nav
+    // MindYourStufer bottom nav
     activeTab==="psyco"&&e("div",{style:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",background:t.surface,borderTop:`1px solid ${t.border}`,display:"flex",width:"100%",maxWidth:480,zIndex:10}},
       ...PSYCO_NAV.map(n=>e("button",{key:n.id,onClick:()=>setPage(n.id),style:{flex:1,padding:"10px 0",background:page===n.id?t.surface2:"transparent",border:"none",borderTop:`2px solid ${page===n.id?t.accent:"transparent"}`,color:page===n.id?t.accent:t.text2,cursor:"pointer",fontFamily:t.body,fontSize:10,fontWeight:page===n.id?700:400,display:"flex",flexDirection:"column",alignItems:"center",gap:3}},
         e("span",{style:{fontSize:18}},n.icon),n.lbl
@@ -780,21 +1014,38 @@ function App() {
     modal&&modal.type==="account"&&e("div",{style:s.modal,onClick:closeModal},
       e("div",{style:s.mbox,onClick:ev=>ev.stopPropagation()},
         e("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:20}},
-          e("div",{style:{width:48,height:48,borderRadius:"50%",background:t.surface2,overflow:"hidden",flexShrink:0}},
-            user&&user.photoURL&&e("img",{src:user.photoURL,alt:"",style:{width:"100%",height:"100%",objectFit:"cover"}})
-          ),
+          e("div",{style:{width:48,height:48,borderRadius:"50%",background:t.surface2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}},"👤"),
           e("div",null,
-            e("div",{style:{fontFamily:t.font,fontSize:16,fontWeight:600,color:t.text}},user?user.displayName:""),
-            e("div",{style:{fontSize:12,color:t.text2,marginTop:2}},user?user.email:"")
+            e("div",{style:{fontFamily:t.font,fontSize:16,fontWeight:600,color:t.text}},user?user.email:""),
+            e("div",{style:{fontSize:12,color:t.text2,marginTop:2}},user?user.uid.slice(0,8)+"…":"")
           )
         ),
         e("button",{style:s.btn("danger",{width:"100%"}),onClick:()=>{auth.signOut();closeModal();}},"Disconnetti")
+      )
+    ),
+    modal&&modal.type==="theme"&&e("div",{style:s.modal,onClick:closeModal},
+      e("div",{style:s.mbox,onClick:ev=>ev.stopPropagation()},
+        e("div",{style:s.h2},"🎨 Tema"),
+        e("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}},
+          ...Object.entries(THEMES).map(([k,th])=>e("button",{key:k,onClick:()=>{setTheme(k);closeModal();},style:{background:th.surface,border:`${theme===k?"2px":"1px"} solid ${theme===k?t.accent:t.border}`,borderRadius:12,padding:14,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:8}},
+            e("div",{style:{width:44,height:44,borderRadius:"50%",background:`conic-gradient(${th.accent} 0deg,${th.bg} 180deg,${th.surface2} 360deg)`,border:`2px solid ${th.border}`}}),
+            e("span",{style:{fontFamily:th.font,fontSize:13,color:th.text,textAlign:"center"}},th.name),
+            theme===k&&e("span",{style:{fontSize:10,color:th.accent}},"● attivo")
+          ))
+        )
       )
     )
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+function Root() {
+  const [fbReady,setFbReady]=useState(!!getSavedConfig());
+  if(!fbReady) return e(FirebaseSetupScreen,{onDone:()=>setFbReady(true)});
+  return e(App);
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(Root));
+}); // end window.addEventListener('load')
 </script>
 </body>
 </html>
